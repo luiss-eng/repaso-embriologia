@@ -1,8 +1,8 @@
+import json
 import random
-import re
-import pypdf
 import streamlit as st
 from google import genai
+from google.genai import types
 
 # Configuración de página
 st.set_page_config(
@@ -25,86 +25,77 @@ api_key = st.sidebar.text_input(
     help="Obtén una gratis en aistudio.google.com",
 )
 
-st.sidebar.header("2. Cargar Documento")
+st.sidebar.header("2. Cargar Cuestionario")
 uploaded_file = st.sidebar.file_uploader(
-    "Sube tu cuestionario (.txt o .pdf)", type=["txt", "pdf"]
+    "Sube tu cuestionario (.pdf)", type=["pdf"]
 )
 
 if uploaded_file and api_key:
-    llave_limpia = api_key.strip()
-    client = genai.Client(api_key=llave_limpia)
-    raw_text = ""
+    # Inicializar cliente Gemini
+    client = genai.Client(api_key=api_key.strip())
 
-    # Extraer texto del archivo
-    if uploaded_file.name.endswith(".txt"):
-        raw_text = uploaded_file.read().decode("utf-8")
-    elif uploaded_file.name.endswith(".pdf"):
-        pdf_reader = pypdf.PdfReader(uploaded_file)
-        for page in pdf_reader.pages:
-            text_page = page.extract_text()
-            if text_page:
-                raw_text += text_page + "\n"
+    # Cargar y procesar el PDF directamente con Gemini si no se ha cargado antes
+    if (
+        "questions_data" not in st.session_state
+        or st.session_state.get("last_file") != uploaded_file.name
+    ):
+        with st.spinner(
+            "🧠 Analizando el documento PDF con IA... (Esto solo toma unos"
+            " segundos)"
+        ):
+            try:
+                pdf_bytes = uploaded_file.read()
 
-    # --- LECTURA INTELIGENTE DE PREGUNTAS Y RESPUESTAS ---
-    questions_data = []
-    pattern = r"\n(?=\d+\.)"
-    blocks = re.split(pattern, "\n" + raw_text)
+                prompt_extractor = """
+                Analiza el documento adjunto. Es un cuestionario de Embriología con preguntas numeradas y sus respuestas.
+                Extrae TODAS las preguntas numeradas con su respectiva respuesta correcta.
+                
+                Devuelve ÚNICAMENTE un JSON válido con el siguiente formato exacto, sin bloques de código markdown extra:
+                [
+                  {
+                    "num": "1",
+                    "pregunta": "Texto exacto de la pregunta",
+                    "respuesta_correcta": "Texto completo de la respuesta de referencia"
+                  }
+                ]
+                """
 
-    for block in blocks:
-        block = block.strip()
-        if not block:
-            continue
-
-        m = re.match(r"^(\d+)\.\s*(.*)", block, re.DOTALL)
-        if m:
-            num = m.group(1)
-            content = m.group(2).strip()
-
-            if not content:
-                continue
-
-            lines = [l.strip() for l in content.split("\n") if l.strip()]
-            if not lines:
-                continue
-
-            q_lines = []
-            for line in lines:
-                # 1. Detección exacta de viñetas (•, -, *, etc.)
-                if re.match(
-                    r"^\s*[•\-\*\u2022\u25cf\u25cb\uf0b7\uf0a7\u2013\u2014\u25ba\u25b6]",
-                    line,
-                ):
-                    break
-
-                # 2. Palabras clave de inicio de respuesta en exámenes
-                if q_lines and re.match(
-                    r"^(Origen|Papel|Fallo|Partes|Mitosis|Meiosis|Capa|Tejido|Ocurre|Originan|Aberturas|Neuroporo|Carnívoros|Rumiantes|Equinos|Respuesta|Resp|Solución):",
-                    line,
-                    re.IGNORECASE,
-                ):
-                    break
-
-                # 3. Etiquetas de respuesta genéricas ("Texto:")
-                if q_lines:
-                    prev = q_lines[-1]
-                    if (prev.endswith(":") or prev.endswith("?")) and re.match(
-                        r"^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ0-9\s\(\/\-]{1,35}:",
-                        line,
-                    ):
-                        break
-
-                q_lines.append(line)
-
-            q_text = " ".join(q_lines) if q_lines else lines[0]
-
-            if len(q_text) > 5:
-                questions_data.append(
-                    {"num": num, "question": q_text, "full_context": block}
+                # Usamos gemini-2.5-flash enviando los bytes del PDF directamente
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        types.Part.from_bytes(
+                            data=pdf_bytes,
+                            mime_type="application/pdf",
+                        ),
+                        prompt_extractor,
+                    ],
                 )
 
-    if questions_data:
+                cleaned_text = (
+                    response.text.strip()
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+                questions_json = json.loads(cleaned_text)
+
+                st.session_state["questions_data"] = questions_json
+                st.session_state["last_file"] = uploaded_file.name
+                st.rerun()
+
+            except Exception as e:
+                st.error(
+                    f"🛑 Error procesando el PDF con IA: {str(e)}. Verifica que"
+                    " tu API Key sea válida."
+                )
+
+    # Si ya tenemos las preguntas procesadas
+    if "questions_data" in st.session_state:
+        questions_data = st.session_state["questions_data"]
+
         st.sidebar.success(
-            f"✅ Se detectaron {len(questions_data)} preguntas numeradas."
+            f"✅ Se procesaron {len(questions_data)} preguntas con éxito."
         )
 
         st.sidebar.header("3. Examen")
@@ -126,7 +117,7 @@ if uploaded_file and api_key:
                 st.markdown(
                     f"### Pregunta {i} *(Del documento: #{item['num']})*"
                 )
-                st.info(item["question"])
+                st.info(item["pregunta"])
 
                 user_ans = st.text_area(
                     f"Tu respuesta:", key=f"ans_{i}", height=100
@@ -137,55 +128,36 @@ if uploaded_file and api_key:
                         st.warning("Escribe algo antes de evaluar.")
                     else:
                         with st.spinner("La IA está revisando tu respuesta..."):
-                            prompt = f"""
+                            prompt_eval = f"""
                             Eres un profesor experto en Embriología.
                             
-                            TEXTO ORIGINAL DEL DOCUMENTO (Esta es la respuesta correcta de referencia):
-                            "{item['full_context']}"
+                            PREGUNTA:
+                            "{item['pregunta']}"
+                            
+                            RESPUESTA CORRECTA DE REFERENCIA:
+                            "{item['respuesta_correcta']}"
                             
                             RESPUESTA DEL ESTUDIANTE:
                             "{user_ans}"
                             
                             EVALUACIÓN:
-                            1. Determina si la respuesta del estudiante captura los conceptos correctos del TEXTO ORIGINAL.
+                            1. Determina si la respuesta del estudiante es conceptualmente correcta respecto a la respuesta de referencia.
                             2. Asigna una calificación de 0 a 100%.
-                            3. Da una explicación breve de la evaluación.
+                            3. Explica brevemente aciertos y correcciones necesarias.
                             """
 
-                            # MODELOS ESTABLES EN ORDEN DE PREFERENCIA
-                            modelos_a_probar = [
-                                "gemini-2.0-flash",
-                                "gemini-2.5-flash",
-                                "gemini-1.5-flash",
-                            ]
-                            response = None
-                            ultimo_error = ""
-
-                            for mod in modelos_a_probar:
-                                try:
-                                    response = client.models.generate_content(
-                                        model=mod, contents=prompt
-                                    )
-                                    if response and response.text:
-                                        break
-                                except Exception as e:
-                                    ultimo_error = str(e)
-                                    continue
-
-                            if response and response.text:
+                            try:
+                                res_eval = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=prompt_eval,
+                                )
                                 st.markdown("### 📊 Resultado de la IA:")
-                                st.write(response.text)
-                            else:
+                                st.write(res_eval.text)
+                            except Exception as e:
                                 st.error(
-                                    f"🛑 Error al conectar con Gemini:"
-                                    f" {ultimo_error}"
+                                    f"🛑 Error evaluando con Gemini: {str(e)}"
                                 )
                 st.divider()
-    else:
-        st.error(
-            "⚠️ No pude encontrar preguntas numeradas (formato '1. ', '2. ',"
-            " etc.). Revisa tu archivo."
-        )
 
 elif uploaded_file and not api_key:
     st.warning(

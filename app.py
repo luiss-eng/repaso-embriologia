@@ -28,7 +28,9 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file and api_key:
-    client = genai.Client(api_key=api_key)
+    # AQUI LIMPIAMOS LA CLAVE DE ESPACIOS FANTASMAS
+    llave_limpia = api_key.strip()
+    client = genai.Client(api_key=llave_limpia)
     raw_text = ""
 
     # Extraer texto del archivo
@@ -41,8 +43,6 @@ if uploaded_file and api_key:
 
     # --- SECCIÓN DE LECTURA INTELIGENTE ---
     questions_data = []
-    
-    # Separar el texto detectando los números de las preguntas
     pattern = r'\n(?=\d+\.)'
     blocks = re.split(pattern, '\n' + raw_text)
     
@@ -55,7 +55,6 @@ if uploaded_file and api_key:
             num = m.group(1)
             content = m.group(2)
             
-            # NUEVO FILTRO: Busca ':', '?', un punto y aparte (.\n), o rayas (____.)
             match_end = re.search(r'(:|\?|\.\s*\n|____\.)', content)
             
             if match_end and match_end.end() < 400: 
@@ -63,14 +62,13 @@ if uploaded_file and api_key:
                 q_text = content[:split_idx].strip()
                 q_text = q_text.replace('\n', ' ') 
             else:
-                # Si no encuentra un final claro, intenta tomar los dos primeros renglones enteros
                 lines = content.split('\n')
                 q_text = " ".join(lines[:2]).strip() if len(lines) > 1 else lines[0].strip()
                 
             questions_data.append({
                 "num": num,
                 "question": q_text,
-                "full_context": block # Guardamos la respuesta para la IA
+                "full_context": block 
             })
 
     if questions_data:
@@ -114,18 +112,21 @@ if uploaded_file and api_key:
                             "{user_ans}"
                             
                             EVALUACIÓN:
-                            1. Determina si la respuesta del estudiante captura los conceptos correctos del TEXTO ORIGINAL, considerando sinónimos y redacción médica.
+                            1. Determina si la respuesta del estudiante captura los conceptos correctos del TEXTO ORIGINAL.
                             2. Asigna una calificación de 0 a 100%.
-                            3. Da una explicación breve de qué estuvo bien o qué le faltó, basándote SOLO en el texto original. No reveles la respuesta si se equivocó por completo.
+                            3. Da una explicación breve.
                             """
 
-                            # VERSIÓN 1.5 DE GEMINI PARA EVITAR EL ERROR ROJO
-                            response = client.models.generate_content(
-                                model="gemini-1.5-flash", contents=prompt
-                            )
-
-                            st.markdown("### 📊 Resultado de la IA:")
-                            st.write(response.text)
+                            # AQUI ATRAPAMOS EL ERROR REAL PARA PODER VERLO
+                            try:
+                                response = client.models.generate_content(
+                                    model="gemini-1.5-flash", contents=prompt
+                                )
+                                st.markdown("### 📊 Resultado de la IA:")
+                                st.write(response.text)
+                            except Exception as e:
+                                st.error(f"🛑 ERROR REAL DE GOOGLE: {str(e)}")
+                                st.info("Si el error dice algo de 'API_KEY_INVALID', asegúrate de que copiaste la clave correcta. Si dice algo de 'User location is not supported', avísame y probaremos otra solución.")
                 st.divider()
     else:
         st.error("⚠️ No pude encontrar preguntas numeradas (formato '1. ', '2. ', etc.). Revisa tu archivo.")

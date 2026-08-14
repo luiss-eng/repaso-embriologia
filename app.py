@@ -69,21 +69,22 @@ if uploaded_file and api_key:
 
             q_lines = []
             for line in lines:
-                # 1. Si la línea empieza con viñeta, aquí inicia la respuesta
-                if re.search(
-                    r"^[\s\W]*[•\-\*\u2022\u25cf\u25cb\uf0b7\u2013\u2014]", line
+                # 1. Detección exacta de viñetas (•, -, *, etc.)
+                if re.match(
+                    r"^\s*[•\-\*\u2022\u25cf\u25cb\uf0b7\uf0a7\u2013\u2014\u25ba\u25b6]",
+                    line,
                 ):
                     break
 
-                # 2. Palabras clave explícitas de respuestas en exámenes de embriología
+                # 2. Palabras clave de inicio de respuesta en exámenes
                 if q_lines and re.match(
-                    r"^(Mitosis|Meiosis|Capa|Tejido|Ocurre|Originan|Aberturas|Neuroporo|Carnívoros|Rumiantes|Equinos|Respuesta|Resp|Solución):",
+                    r"^(Origen|Papel|Fallo|Partes|Mitosis|Meiosis|Capa|Tejido|Ocurre|Originan|Aberturas|Neuroporo|Carnívoros|Rumiantes|Equinos|Respuesta|Resp|Solución):",
                     line,
                     re.IGNORECASE,
                 ):
                     break
 
-                # 3. Si la línea anterior terminaba en ':' o '?' y esta línea empieza con Etiqueta:
+                # 3. Etiquetas de respuesta genéricas ("Texto:")
                 if q_lines:
                     prev = q_lines[-1]
                     if (prev.endswith(":") or prev.endswith("?")) and re.match(
@@ -151,11 +152,11 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de la evaluación.
                             """
 
-                            # MODELOS OFICIALES ESTABLES
+                            # MODELOS ESTABLES EN ORDEN DE PREFERENCIA
                             modelos_a_probar = [
-                                "gemini-1.5-flash",
                                 "gemini-2.0-flash",
-                                "gemini-1.5-pro",
+                                "gemini-2.5-flash",
+                                "gemini-1.5-flash",
                             ]
                             response = None
                             ultimo_error = ""

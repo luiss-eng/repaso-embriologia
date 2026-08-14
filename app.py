@@ -43,7 +43,7 @@ if uploaded_file and api_key:
         for page in pdf_reader.pages:
             raw_text += page.extract_text() + "\n"
 
-    # --- LECTURA INTELIGENTE PROTEGIDA ---
+    # --- LECTURA INTELIGENTE DE PREGUNTAS Y RESPUESTAS ---
     questions_data = []
     pattern = r"\n(?=\d+\.)"
     blocks = re.split(pattern, "\n" + raw_text)
@@ -67,28 +67,28 @@ if uploaded_file and api_key:
 
             q_lines = []
             for line in lines:
-                # Si encontramos un símbolo de viñeta (•, -, *, etc.), aquí empieza la respuesta
+                # 1. Si encuentra una viñeta (•, -, *), aquí inicia la respuesta
                 if re.match(r"^[\u2022\u25cf\u25cb\uf0b7\-\*•]", line):
                     break
 
-                # Si ya tenemos texto de pregunta y la nueva línea parece un encabezado de respuesta
+                # 2. Detecta etiquetas de respuesta estilo "Neuroporo Craneal:", "Capa germinativa:", etc.
+                if q_lines and re.match(r"^[A-Z][A-Za-z0-9\s\(\/\-]{2,35}:", line):
+                    break
+
+                # 3. Detecta inicio de respuesta tras ':' o '?'
                 if q_lines:
-                    prev_line = q_lines[-1]
-                    if (
-                        prev_line.endswith(":") or prev_line.endswith("?")
-                    ) and re.match(
-                        r"^(Etapas|Capas|Proteínas|Acondroplasia|En |Vías|Respuesta|Resp|Solución|[A-Z][a-z]+:)",
-                        line,
-                    ):
-                        break
+                    prev = q_lines[-1]
+                    if prev.endswith(":") or prev.endswith("?"):
+                        if re.match(
+                            r"^(Neuroporo|Capa|Tejido|Originan|Se encuentran|Etapas|Capas|Proteínas|Acondroplasia|Respuesta|Resp)\b",
+                            line,
+                            re.IGNORECASE,
+                        ):
+                            break
 
                 q_lines.append(line)
 
-            # Selección segura de la pregunta sin riesgo de IndexError
-            if q_lines:
-                q_text = " ".join(q_lines)
-            else:
-                q_text = lines[0]
+            q_text = " ".join(q_lines) if q_lines else lines[0]
 
             questions_data.append(
                 {"num": num, "question": q_text, "full_context": block}
@@ -144,33 +144,41 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de la evaluación.
                             """
 
-                            modelos = [
-                                "gemini-1.5-flash",
-                                "gemini-2.0-flash",
-                                "gemini-1.5-pro",
-                            ]
-                            response = None
-                            error_msg = ""
+                            try:
+                                # CONSULTA DINÁMICA DE MODELOS PARA EVITAR ERRORES 404
+                                modelos_disponibles = [
+                                    m.name for m in client.models.list()
+                                ]
+                                modelo_elegido = None
 
-                            for mod in modelos:
-                                try:
-                                    response = client.models.generate_content(
-                                        model=mod, contents=prompt
-                                    )
-                                    if response:
+                                preferencias = [
+                                    "gemini-2.5-flash",
+                                    "gemini-1.5-flash",
+                                    "gemini-2.0-flash",
+                                    "gemini-1.5-pro",
+                                    "gemini-pro",
+                                ]
+
+                                for pref in preferencias:
+                                    for m in modelos_disponibles:
+                                        if pref in m:
+                                            modelo_elegido = m
+                                            break
+                                    if modelo_elegido:
                                         break
-                                except Exception as e:
-                                    error_msg = str(e)
-                                    continue
 
-                            if response:
+                                if not modelo_elegido and modelos_disponibles:
+                                    modelo_elegido = modelos_disponibles[0]
+                                elif not modelo_elegido:
+                                    modelo_elegido = "gemini-2.5-flash"
+
+                                response = client.models.generate_content(
+                                    model=modelo_elegido, contents=prompt
+                                )
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)
-                            else:
-                                st.error(
-                                    f"🛑 No se pudo conectar con los modelos de"
-                                    f" Google: {error_msg}"
-                                )
+                            except Exception as e:
+                                st.error(f"🛑 ERROR DE GOOGLE: {str(e)}")
                 st.divider()
     else:
         st.error(

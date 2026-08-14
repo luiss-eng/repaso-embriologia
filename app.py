@@ -28,10 +28,7 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 if uploaded_file and api_key:
-    # AQUI LIMPIAMOS LA CLAVE DE ESPACIOS FANTASMAS
     llave_limpia = api_key.strip()
-    
-    # NUEVA SINTAXIS OFICIAL DE GOOGLE GENAI
     client = genai.Client(api_key=llave_limpia)
     raw_text = ""
 
@@ -43,7 +40,7 @@ if uploaded_file and api_key:
         for page in pdf_reader.pages:
             raw_text += page.extract_text() + "\n"
 
-    # --- SECCIÓN DE LECTURA INTELIGENTE ---
+    # --- LECTURA INTELIGENTE AJUSTADA ---
     questions_data = []
     pattern = r'\n(?=\d+\.)'
     blocks = re.split(pattern, '\n' + raw_text)
@@ -57,16 +54,19 @@ if uploaded_file and api_key:
             num = m.group(1)
             content = m.group(2)
             
-            match_end = re.search(r'(:|\?|\.\s*\n|____\.)', content)
+            # Corta la pregunta justo antes de la primera viñeta (•) o texto descriptivo de la respuesta
+            match_end = re.search(r'(\n\s*•|\n\s*Etapas:|\n\s*Respuesta:)', content)
             
-            if match_end and match_end.end() < 400: 
-                split_idx = match_end.end()
+            if match_end:
+                split_idx = match_end.start()
                 q_text = content[:split_idx].strip()
-                q_text = q_text.replace('\n', ' ') 
             else:
+                # Si no hay viñetas, toma la primera línea completa
                 lines = content.split('\n')
-                q_text = " ".join(lines[:2]).strip() if len(lines) > 1 else lines[0].strip()
+                q_text = lines[0].strip()
                 
+            q_text = q_text.replace('\n', ' ') # Limpia saltos dentro de la pregunta
+            
             questions_data.append({
                 "num": num,
                 "question": q_text,
@@ -107,7 +107,7 @@ if uploaded_file and api_key:
                             prompt = f"""
                             Eres un profesor experto en Embriología.
                             
-                            TEXTO ORIGINAL DEL DOCUMENTO (Esta es la respuesta correcta):
+                            TEXTO ORIGINAL DEL DOCUMENTO (Esta es la respuesta correcta de referencia):
                             "{item['full_context']}"
                             
                             RESPUESTA DEL ESTUDIANTE:
@@ -116,13 +116,12 @@ if uploaded_file and api_key:
                             EVALUACIÓN:
                             1. Determina si la respuesta del estudiante captura los conceptos correctos del TEXTO ORIGINAL.
                             2. Asigna una calificación de 0 a 100%.
-                            3. Da una explicación breve.
+                            3. Da una explicación breve de la evaluación.
                             """
 
                             try:
-                                # USAMOS EL MODELO OFICIAL CON LA SINTAXIS CORRECTA
                                 response = client.models.generate_content(
-                                    model="gemini-1.5-flash", contents=prompt
+                                    model="gemini-2.0-flash", contents=prompt
                                 )
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)

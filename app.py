@@ -122,7 +122,7 @@ if uploaded_file and api_key:
                             """
 
                             response = client.models.generate_content(
-                                model="gemini-2.5-flash", contents=prompt
+                                model="gemini-1.5-flash", contents=prompt
                             )
 
                             st.markdown("### 📊 Resultado de la IA:")

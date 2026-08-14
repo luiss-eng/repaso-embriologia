@@ -1,6 +1,6 @@
 import random
-import pypdf
 import re
+import pypdf
 import streamlit as st
 from google import genai
 
@@ -12,7 +12,10 @@ st.set_page_config(
 )
 
 st.title("🧬 Repasador de Embriología con IA")
-st.write("Practica tus preguntas. La IA evaluará tus respuestas considerando sinónimos y conceptos.")
+st.write(
+    "Practica tus preguntas. La IA evaluará tus respuestas considerando"
+    " sinónimos y conceptos."
+)
 
 # Sidebar - Configuración
 st.sidebar.header("1. Clave de API")
@@ -40,41 +43,53 @@ if uploaded_file and api_key:
         for page in pdf_reader.pages:
             raw_text += page.extract_text() + "\n"
 
-    # --- LECTURA INTELIGENTE AJUSTADA ---
+    # --- LECTURA INTELIGENTE MULTILÍNEA ---
     questions_data = []
-    pattern = r'\n(?=\d+\.)'
-    blocks = re.split(pattern, '\n' + raw_text)
-    
+    pattern = r"\n(?=\d+\.)"
+    blocks = re.split(pattern, "\n" + raw_text)
+
     for block in blocks:
         block = block.strip()
-        if not block: continue
-        
-        m = re.match(r'^(\d+)\.\s*(.*)', block, re.DOTALL)
+        if not block:
+            continue
+
+        m = re.match(r"^(\d+)\.\s*(.*)", block, re.DOTALL)
         if m:
             num = m.group(1)
             content = m.group(2)
-            
-            # Corta la pregunta justo antes de la primera viñeta (•) o texto descriptivo de la respuesta
-            match_end = re.search(r'(\n\s*•|\n\s*Etapas:|\n\s*Respuesta:)', content)
-            
-            if match_end:
-                split_idx = match_end.start()
-                q_text = content[:split_idx].strip()
-            else:
-                # Si no hay viñetas, toma la primera línea completa
-                lines = content.split('\n')
-                q_text = lines[0].strip()
-                
-            q_text = q_text.replace('\n', ' ') # Limpia saltos dentro de la pregunta
-            
-            questions_data.append({
-                "num": num,
-                "question": q_text,
-                "full_context": block 
-            })
+
+            # Analizamos línea por línea para capturar la pregunta completa antes de la respuesta
+            lines = [l.strip() for l in content.split("\n") if l.strip()]
+            q_lines = []
+
+            for idx, line in enumerate(lines):
+                # Si encontramos un símbolo de viñeta (•, -, *, etc.), aquí empieza la respuesta
+                if re.match(r"^[\u2022\u25cf\u25cb\uf0b7\-\*•]", line):
+                    break
+
+                # Si ya tenemos texto de pregunta y la nueva línea parece un encabezado de respuesta
+                if q_lines:
+                    prev_line = q_lines[-1]
+                    if (
+                        prev_line.endswith(":") or prev_line.endswith("?")
+                    ) and re.match(
+                        r"^(Etapas|Capas|Proteínas|Acondroplasia|En |Vías|Respuesta|Resp|Solución|[A-Z][a-z]+:)",
+                        line,
+                    ):
+                        break
+
+                q_lines.append(line)
+
+            q_text = " ".join(q_lines) if q_lines else lines[0]
+
+            questions_data.append(
+                {"num": num, "question": q_text, "full_context": block}
+            )
 
     if questions_data:
-        st.sidebar.success(f"✅ Se detectaron {len(questions_data)} preguntas numeradas.")
+        st.sidebar.success(
+            f"✅ Se detectaron {len(questions_data)} preguntas numeradas."
+        )
 
         st.sidebar.header("3. Examen")
         num_q = st.sidebar.number_input(
@@ -92,8 +107,10 @@ if uploaded_file and api_key:
             st.subheader("📝 Cuestionario")
 
             for i, item in enumerate(st.session_state["quiz"], 1):
-                st.markdown(f"### Pregunta {i} *(Del documento: #{item['num']})*")
-                st.info(item['question'])
+                st.markdown(
+                    f"### Pregunta {i} *(Del documento: #{item['num']})*"
+                )
+                st.info(item["question"])
 
                 user_ans = st.text_area(
                     f"Tu respuesta:", key=f"ans_{i}", height=100
@@ -119,17 +136,43 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de la evaluación.
                             """
 
-                            try:
-                                response = client.models.generate_content(
-                                    model="gemini-2.0-flash", contents=prompt
-                                )
+                            # SISTEMA MULTI-MODELO DE RESPALDO AUTOMÁTICO
+                            modelos = [
+                                "gemini-2.5-flash",
+                                "gemini-1.5-flash",
+                                "gemini-2.0-flash-exp",
+                            ]
+                            response = None
+                            error_msg = ""
+
+                            for mod in modelos:
+                                try:
+                                    response = client.models.generate_content(
+                                        model=mod, contents=prompt
+                                    )
+                                    if response:
+                                        break
+                                except Exception as e:
+                                    error_msg = str(e)
+                                    continue
+
+                            if response:
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)
-                            except Exception as e:
-                                st.error(f"🛑 ERROR DE GOOGLE: {str(e)}")
+                            else:
+                                st.error(
+                                    f"🛑 No se pudo conectar con los modelos de"
+                                    f" Google: {error_msg}"
+                                )
                 st.divider()
     else:
-        st.error("⚠️ No pude encontrar preguntas numeradas (formato '1. ', '2. ', etc.). Revisa tu archivo.")
+        st.error(
+            "⚠️ No pude encontrar preguntas numeradas (formato '1. ', '2. ',"
+            " etc.). Revisa tu archivo."
+        )
 
 elif uploaded_file and not api_key:
-    st.warning("⚠️ Por favor ingresa tu API Key en la barra lateral para poder evaluar las respuestas.")
+    st.warning(
+        "⚠️ Por favor ingresa tu API Key en la barra lateral para poder evaluar"
+        " las respuestas."
+    )

@@ -120,7 +120,7 @@ if uploaded_file and api_key:
                             # AQUI ATRAPAMOS EL ERROR REAL PARA PODER VERLO
                             try:
                                 response = client.models.generate_content(
-                                    model="gemini-1.5-flash", contents=prompt
+                                    model="gemini-pro", contents=prompt
                                 )
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)

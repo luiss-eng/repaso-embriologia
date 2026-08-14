@@ -43,7 +43,7 @@ if uploaded_file and api_key:
         for page in pdf_reader.pages:
             raw_text += page.extract_text() + "\n"
 
-    # --- LECTURA INTELIGENTE MULTILÍNEA ---
+    # --- LECTURA INTELIGENTE PROTEGIDA ---
     questions_data = []
     pattern = r"\n(?=\d+\.)"
     blocks = re.split(pattern, "\n" + raw_text)
@@ -56,13 +56,17 @@ if uploaded_file and api_key:
         m = re.match(r"^(\d+)\.\s*(.*)", block, re.DOTALL)
         if m:
             num = m.group(1)
-            content = m.group(2)
+            content = m.group(2).strip()
 
-            # Analizamos línea por línea para capturar la pregunta completa antes de la respuesta
+            if not content:
+                continue
+
             lines = [l.strip() for l in content.split("\n") if l.strip()]
-            q_lines = []
+            if not lines:
+                continue
 
-            for idx, line in enumerate(lines):
+            q_lines = []
+            for line in lines:
                 # Si encontramos un símbolo de viñeta (•, -, *, etc.), aquí empieza la respuesta
                 if re.match(r"^[\u2022\u25cf\u25cb\uf0b7\-\*•]", line):
                     break
@@ -80,7 +84,11 @@ if uploaded_file and api_key:
 
                 q_lines.append(line)
 
-            q_text = " ".join(q_lines) if q_lines else lines[0]
+            # Selección segura de la pregunta sin riesgo de IndexError
+            if q_lines:
+                q_text = " ".join(q_lines)
+            else:
+                q_text = lines[0]
 
             questions_data.append(
                 {"num": num, "question": q_text, "full_context": block}
@@ -136,11 +144,10 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de la evaluación.
                             """
 
-                            # SISTEMA MULTI-MODELO DE RESPALDO AUTOMÁTICO
                             modelos = [
-                                "gemini-2.5-flash",
                                 "gemini-1.5-flash",
-                                "gemini-2.0-flash-exp",
+                                "gemini-2.0-flash",
+                                "gemini-1.5-pro",
                             ]
                             response = None
                             error_msg = ""

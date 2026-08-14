@@ -42,7 +42,7 @@ if uploaded_file and api_key:
     # --- SECCIÓN DE LECTURA INTELIGENTE ---
     questions_data = []
     
-    # Separar el texto detectando los números de las preguntas (ej: "106. ")
+    # Separar el texto detectando los números de las preguntas
     pattern = r'\n(?=\d+\.)'
     blocks = re.split(pattern, '\n' + raw_text)
     
@@ -50,28 +50,27 @@ if uploaded_file and api_key:
         block = block.strip()
         if not block: continue
         
-        # Extraer el número y el resto del contenido
         m = re.match(r'^(\d+)\.\s*(.*)', block, re.DOTALL)
         if m:
             num = m.group(1)
             content = m.group(2)
             
-            # Buscar dónde termina la pregunta (suele ser el primer ':' o '?')
-            match_end = re.search(r'[:?]', content)
+            # NUEVO FILTRO: Busca ':', '?', un punto y aparte (.\n), o rayas (____.)
+            match_end = re.search(r'(:|\?|\.\s*\n|____\.)', content)
             
-            if match_end and match_end.end() < 300: 
+            if match_end and match_end.end() < 400: 
                 split_idx = match_end.end()
                 q_text = content[:split_idx].strip()
-                # Unir la pregunta en un solo renglón por si el PDF la cortó a la mitad
                 q_text = q_text.replace('\n', ' ') 
             else:
-                # Si no hay ':' ni '?', tomamos solo el primer renglón
-                q_text = content.split('\n', 1)[0].strip()
+                # Si no encuentra un final claro, intenta tomar los dos primeros renglones enteros
+                lines = content.split('\n')
+                q_text = " ".join(lines[:2]).strip() if len(lines) > 1 else lines[0].strip()
                 
             questions_data.append({
                 "num": num,
                 "question": q_text,
-                "full_context": block # Guardamos todo (pregunta + respuesta) para la IA
+                "full_context": block # Guardamos la respuesta para la IA
             })
 
     if questions_data:
@@ -93,7 +92,6 @@ if uploaded_file and api_key:
             st.subheader("📝 Cuestionario")
 
             for i, item in enumerate(st.session_state["quiz"], 1):
-                # Mostramos el número original de la pregunta del PDF
                 st.markdown(f"### Pregunta {i} *(Del documento: #{item['num']})*")
                 st.info(item['question'])
 
@@ -121,6 +119,7 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de qué estuvo bien o qué le faltó, basándote SOLO en el texto original. No reveles la respuesta si se equivocó por completo.
                             """
 
+                            # VERSIÓN 1.5 DE GEMINI PARA EVITAR EL ERROR ROJO
                             response = client.models.generate_content(
                                 model="gemini-1.5-flash", contents=prompt
                             )

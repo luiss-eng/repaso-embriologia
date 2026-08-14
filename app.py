@@ -67,20 +67,20 @@ if uploaded_file and api_key:
 
             q_lines = []
             for line in lines:
-                # 1. Si encuentra una viñeta (•, -, *), aquí inicia la respuesta
-                if re.match(r"^[\u2022\u25cf\u25cb\uf0b7\-\*•]", line):
+                # 1. Detecta viñetas de cualquier tipo (•, -, *, etc.) incluso si tienen espacios
+                if re.search(r"^[\s\W]*[•\-\*\u2022\u25cf\u25cb\uf0b7\u2013\u2014]", line):
                     break
 
-                # 2. Detecta etiquetas de respuesta estilo "Neuroporo Craneal:", "Capa germinativa:", etc.
-                if q_lines and re.match(r"^[A-Z][A-Za-z0-9\s\(\/\-]{2,35}:", line):
+                # 2. Detecta etiquetas de respuesta en español con tildes (ej. "Carnívoros:", "Rumiantes:", "Aberturas:")
+                if q_lines and re.match(r"^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ0-9\s\(\/\-]{1,40}:", line):
                     break
 
-                # 3. Detecta inicio de respuesta tras ':' o '?'
+                # 3. Si la línea anterior de la pregunta termina en ':' o '?' y la nueva línea parece una categoría
                 if q_lines:
                     prev = q_lines[-1]
                     if prev.endswith(":") or prev.endswith("?"):
                         if re.match(
-                            r"^(Neuroporo|Capa|Tejido|Originan|Se encuentran|Etapas|Capas|Proteínas|Acondroplasia|Respuesta|Resp)\b",
+                            r"^(Carnívoros|Rumiantes|Equinos|Neuroporo|Capa|Tejido|Originan|Se encuentran|Etapas|Capas|Proteínas|Acondroplasia|Respuesta|Resp)\b",
                             line,
                             re.IGNORECASE,
                         ):
@@ -145,7 +145,7 @@ if uploaded_file and api_key:
                             """
 
                             try:
-                                # CONSULTA DINÁMICA DE MODELOS PARA EVITAR ERRORES 404
+                                # Consulta dinámica de modelos disponibles para la API Key
                                 modelos_disponibles = [
                                     m.name for m in client.models.list()
                                 ]

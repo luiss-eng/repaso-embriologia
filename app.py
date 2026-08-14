@@ -30,6 +30,8 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file and api_key:
     # AQUI LIMPIAMOS LA CLAVE DE ESPACIOS FANTASMAS
     llave_limpia = api_key.strip()
+    
+    # NUEVA SINTAXIS OFICIAL DE GOOGLE GENAI
     client = genai.Client(api_key=llave_limpia)
     raw_text = ""
 
@@ -117,16 +119,15 @@ if uploaded_file and api_key:
                             3. Da una explicación breve.
                             """
 
-                            # AQUI ATRAPAMOS EL ERROR REAL PARA PODER VERLO
                             try:
+                                # USAMOS EL MODELO OFICIAL CON LA SINTAXIS CORRECTA
                                 response = client.models.generate_content(
-                                    model = genai.GenerativeModel('gemini-1.5-flash')
+                                    model="gemini-1.5-flash", contents=prompt
                                 )
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)
                             except Exception as e:
-                                st.error(f"🛑 ERROR REAL DE GOOGLE: {str(e)}")
-                                st.info("Si el error dice algo de 'API_KEY_INVALID', asegúrate de que copiaste la clave correcta. Si dice algo de 'User location is not supported', avísame y probaremos otra solución.")
+                                st.error(f"🛑 ERROR DE GOOGLE: {str(e)}")
                 st.divider()
     else:
         st.error("⚠️ No pude encontrar preguntas numeradas (formato '1. ', '2. ', etc.). Revisa tu archivo.")

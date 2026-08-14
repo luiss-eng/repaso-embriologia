@@ -1,8 +1,9 @@
 import json
 import random
+import re
+import pypdf
 import streamlit as st
 from google import genai
-from google.genai import types
 
 # Configuración de página
 st.set_page_config(
@@ -27,84 +28,132 @@ api_key = st.sidebar.text_input(
 
 st.sidebar.header("2. Cargar Cuestionario")
 uploaded_file = st.sidebar.file_uploader(
-    "Sube tu cuestionario (.pdf)", type=["pdf"]
+    "Sube tu cuestionario (.pdf o .txt)", type=["pdf", "txt"]
 )
 
 
-# Función segura que prueba con los modelos activos oficiales
-def generar_con_fallback(client, contents):
-    modelos_estables = ["gemini-2.0-flash", "gemini-1.5-flash"]
-    ultimo_error = None
+# --- FUNCIÓN INTELIGENTE DE CONEXIÓN CON GEMINI ---
+def consultar_gemini_seguro(client, prompt):
+    """Detecta dinámicamente qué modelos están habilitados para la API Key y los prueba en orden."""
+    modelos_encontrados = []
 
-    for mod in modelos_estables:
+    # 1. Intentar listar los modelos a los que tiene acceso tu API Key
+    try:
+        for m in client.models.list():
+            if m.name and "gemini" in m.name.lower():
+                nombre_limpio = m.name.replace("models/", "")
+                modelos_encontrados.append(nombre_limpio)
+    except Exception:
+        pass
+
+    # 2. Lista de nombres habituales ordenados por preferencia
+    preferencias = [
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash-8b",
+    ]
+
+    # Priorizar los modelos detectados realmente en tu cuenta
+    candidatos = [mod for mod in preferencias if mod in modelos_encontrados]
+
+    # Agregar el resto por si el listado automático falló
+    for mod in preferencias:
+        if mod not in candidatos:
+            candidatos.append(mod)
+
+    for mod in modelos_encontrados:
+        if mod not in candidatos:
+            candidatos.append(mod)
+
+    # 3. Probar modelo por modelo hasta encontrar uno funcional
+    ultimo_error = None
+    for mod in candidatos:
         try:
-            res = client.models.generate_content(model=mod, contents=contents)
+            res = client.models.generate_content(model=mod, contents=prompt)
             if res and res.text:
                 return res.text
         except Exception as e:
             ultimo_error = e
             continue
 
-    raise ultimo_error
+    raise Exception(
+        f"No se pudo conectar con los servidores de Google. Detalle del"
+        f" error: {ultimo_error}"
+    )
 
 
 if uploaded_file and api_key:
     client = genai.Client(api_key=api_key.strip())
 
-    # Cargar y procesar el PDF directamente con Gemini si no se ha cargado antes
+    # Procesar archivo si no se ha cargado previamente
     if (
         "questions_data" not in st.session_state
         or st.session_state.get("last_file") != uploaded_file.name
     ):
         with st.spinner(
-            "🧠 Analizando el documento PDF con IA... (Esto solo toma unos"
-            " segundos)"
+            "🧠 Extrayendo texto y organizando el cuestionario con IA..."
         ):
             try:
-                pdf_bytes = uploaded_file.read()
+                # Extraer texto básico
+                raw_text = ""
+                if uploaded_file.name.endswith(".pdf"):
+                    pdf_reader = pypdf.PdfReader(uploaded_file)
+                    for page in pdf_reader.pages:
+                        t = page.extract_text()
+                        if t:
+                            raw_text += t + "\n"
+                else:
+                    raw_text = uploaded_file.read().decode("utf-8")
 
-                prompt_extractor = """
-                Analiza el documento adjunto. Es un cuestionario de Embriología con preguntas numeradas y sus respuestas.
-                Extrae TODAS las preguntas numeradas con su respectiva respuesta correcta.
-                
-                Devuelve ÚNICAMENTE un JSON válido con el siguiente formato exacto, sin bloques de código markdown extra:
-                [
-                  {
-                    "num": "1",
-                    "pregunta": "Texto exacto de la pregunta",
-                    "respuesta_correcta": "Texto completo de la respuesta de referencia"
-                  }
-                ]
-                """
+                if not raw_text.strip():
+                    st.error(
+                        "🛑 No se pudo extraer texto del archivo. Asegúrate de"
+                        " que no sea un PDF escaneado como imagen."
+                    )
+                else:
+                    prompt_extractor = f"""
+                    Eres un profesor de Embriología estructurando un examen.
+                    A continuación tienes el texto extraído de un cuestionario:
 
-                contents = [
-                    types.Part.from_bytes(
-                        data=pdf_bytes,
-                        mime_type="application/pdf",
-                    ),
-                    prompt_extractor,
-                ]
+                    ---
+                    {raw_text}
+                    ---
 
-                res_text = generar_con_fallback(client, contents)
-                cleaned_text = (
-                    res_text.strip()
-                    .replace("```json", "")
-                    .replace("```", "")
-                    .strip()
-                )
-                questions_json = json.loads(cleaned_text)
+                    Tu tarea es extraer TODAS las preguntas numeradas con su respectiva respuesta correcta.
+                    
+                    Devuelve ÚNICAMENTE un JSON válido con esta estructura (sin formato Markdown adicional):
+                    [
+                      {{
+                        "num": "1",
+                        "pregunta": "Enunciado exacto de la pregunta",
+                        "respuesta_correcta": "Respuesta completa de referencia"
+                      }}
+                    ]
+                    """
 
-                st.session_state["questions_data"] = questions_json
-                st.session_state["last_file"] = uploaded_file.name
-                st.rerun()
+                    res_text = consultar_gemini_seguro(client, prompt_extractor)
+
+                    # Limpieza de código JSON
+                    cleaned_json_text = (
+                        res_text.strip()
+                        .replace("```json", "")
+                        .replace("```", "")
+                        .strip()
+                    )
+                    questions_json = json.loads(cleaned_json_text)
+
+                    st.session_state["questions_data"] = questions_json
+                    st.session_state["last_file"] = uploaded_file.name
+                    st.rerun()
 
             except Exception as e:
                 st.error(
-                    f"🛑 Error procesando el PDF con IA: {str(e)}. Verifica que"
-                    " tu API Key sea válida."
+                    f"🛑 Ocurrió un error al procesar el archivo: {str(e)}"
                 )
 
-    # Si ya tenemos las preguntas procesadas
+    # Si las preguntas ya están cargadas en la sesión
     if "questions_data" in st.session_state:
         questions_data = st.session_state["questions_data"]
 
@@ -161,14 +210,14 @@ if uploaded_file and api_key:
                             """
 
                             try:
-                                eval_text = generar_con_fallback(
+                                eval_text = consultar_gemini_seguro(
                                     client, prompt_eval
                                 )
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(eval_text)
                             except Exception as e:
                                 st.error(
-                                    f"🛑 Error evaluando con Gemini: {str(e)}"
+                                    f"🛑 Error evaluando la respuesta: {str(e)}"
                                 )
                 st.divider()
 

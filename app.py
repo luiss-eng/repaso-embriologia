@@ -41,7 +41,9 @@ if uploaded_file and api_key:
     elif uploaded_file.name.endswith(".pdf"):
         pdf_reader = pypdf.PdfReader(uploaded_file)
         for page in pdf_reader.pages:
-            raw_text += page.extract_text() + "\n"
+            text_page = page.extract_text()
+            if text_page:
+                raw_text += text_page + "\n"
 
     # --- LECTURA INTELIGENTE DE PREGUNTAS Y RESPUESTAS ---
     questions_data = []
@@ -67,32 +69,37 @@ if uploaded_file and api_key:
 
             q_lines = []
             for line in lines:
-                # 1. Detecta viñetas de cualquier tipo (•, -, *, etc.) incluso si tienen espacios
-                if re.search(r"^[\s\W]*[•\-\*\u2022\u25cf\u25cb\uf0b7\u2013\u2014]", line):
+                # 1. Si la línea empieza con viñeta, aquí inicia la respuesta
+                if re.search(
+                    r"^[\s\W]*[•\-\*\u2022\u25cf\u25cb\uf0b7\u2013\u2014]", line
+                ):
                     break
 
-                # 2. Detecta etiquetas de respuesta en español con tildes (ej. "Carnívoros:", "Rumiantes:", "Aberturas:")
-                if q_lines and re.match(r"^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ0-9\s\(\/\-]{1,40}:", line):
+                # 2. Palabras clave explícitas de respuestas en exámenes de embriología
+                if q_lines and re.match(
+                    r"^(Mitosis|Meiosis|Capa|Tejido|Ocurre|Originan|Aberturas|Neuroporo|Carnívoros|Rumiantes|Equinos|Respuesta|Resp|Solución):",
+                    line,
+                    re.IGNORECASE,
+                ):
                     break
 
-                # 3. Si la línea anterior de la pregunta termina en ':' o '?' y la nueva línea parece una categoría
+                # 3. Si la línea anterior terminaba en ':' o '?' y esta línea empieza con Etiqueta:
                 if q_lines:
                     prev = q_lines[-1]
-                    if prev.endswith(":") or prev.endswith("?"):
-                        if re.match(
-                            r"^(Carnívoros|Rumiantes|Equinos|Neuroporo|Capa|Tejido|Originan|Se encuentran|Etapas|Capas|Proteínas|Acondroplasia|Respuesta|Resp)\b",
-                            line,
-                            re.IGNORECASE,
-                        ):
-                            break
+                    if (prev.endswith(":") or prev.endswith("?")) and re.match(
+                        r"^[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ0-9\s\(\/\-]{1,35}:",
+                        line,
+                    ):
+                        break
 
                 q_lines.append(line)
 
             q_text = " ".join(q_lines) if q_lines else lines[0]
 
-            questions_data.append(
-                {"num": num, "question": q_text, "full_context": block}
-            )
+            if len(q_text) > 5:
+                questions_data.append(
+                    {"num": num, "question": q_text, "full_context": block}
+                )
 
     if questions_data:
         st.sidebar.success(
@@ -144,41 +151,34 @@ if uploaded_file and api_key:
                             3. Da una explicación breve de la evaluación.
                             """
 
-                            try:
-                                # Consulta dinámica de modelos disponibles para la API Key
-                                modelos_disponibles = [
-                                    m.name for m in client.models.list()
-                                ]
-                                modelo_elegido = None
+                            # MODELOS OFICIALES ESTABLES
+                            modelos_a_probar = [
+                                "gemini-1.5-flash",
+                                "gemini-2.0-flash",
+                                "gemini-1.5-pro",
+                            ]
+                            response = None
+                            ultimo_error = ""
 
-                                preferencias = [
-                                    "gemini-2.5-flash",
-                                    "gemini-1.5-flash",
-                                    "gemini-2.0-flash",
-                                    "gemini-1.5-pro",
-                                    "gemini-pro",
-                                ]
-
-                                for pref in preferencias:
-                                    for m in modelos_disponibles:
-                                        if pref in m:
-                                            modelo_elegido = m
-                                            break
-                                    if modelo_elegido:
+                            for mod in modelos_a_probar:
+                                try:
+                                    response = client.models.generate_content(
+                                        model=mod, contents=prompt
+                                    )
+                                    if response and response.text:
                                         break
+                                except Exception as e:
+                                    ultimo_error = str(e)
+                                    continue
 
-                                if not modelo_elegido and modelos_disponibles:
-                                    modelo_elegido = modelos_disponibles[0]
-                                elif not modelo_elegido:
-                                    modelo_elegido = "gemini-2.5-flash"
-
-                                response = client.models.generate_content(
-                                    model=modelo_elegido, contents=prompt
-                                )
+                            if response and response.text:
                                 st.markdown("### 📊 Resultado de la IA:")
                                 st.write(response.text)
-                            except Exception as e:
-                                st.error(f"🛑 ERROR DE GOOGLE: {str(e)}")
+                            else:
+                                st.error(
+                                    f"🛑 Error al conectar con Gemini:"
+                                    f" {ultimo_error}"
+                                )
                 st.divider()
     else:
         st.error(

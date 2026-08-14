@@ -30,8 +30,25 @@ uploaded_file = st.sidebar.file_uploader(
     "Sube tu cuestionario (.pdf)", type=["pdf"]
 )
 
+
+# Función segura que prueba con los modelos activos oficiales
+def generar_con_fallback(client, contents):
+    modelos_estables = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    ultimo_error = None
+
+    for mod in modelos_estables:
+        try:
+            res = client.models.generate_content(model=mod, contents=contents)
+            if res and res.text:
+                return res.text
+        except Exception as e:
+            ultimo_error = e
+            continue
+
+    raise ultimo_error
+
+
 if uploaded_file and api_key:
-    # Inicializar cliente Gemini
     client = genai.Client(api_key=api_key.strip())
 
     # Cargar y procesar el PDF directamente con Gemini si no se ha cargado antes
@@ -60,20 +77,17 @@ if uploaded_file and api_key:
                 ]
                 """
 
-                # Usamos gemini-2.5-flash enviando los bytes del PDF directamente
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[
-                        types.Part.from_bytes(
-                            data=pdf_bytes,
-                            mime_type="application/pdf",
-                        ),
-                        prompt_extractor,
-                    ],
-                )
+                contents = [
+                    types.Part.from_bytes(
+                        data=pdf_bytes,
+                        mime_type="application/pdf",
+                    ),
+                    prompt_extractor,
+                ]
 
+                res_text = generar_con_fallback(client, contents)
                 cleaned_text = (
-                    response.text.strip()
+                    res_text.strip()
                     .replace("```json", "")
                     .replace("```", "")
                     .strip()
@@ -147,12 +161,11 @@ if uploaded_file and api_key:
                             """
 
                             try:
-                                res_eval = client.models.generate_content(
-                                    model="gemini-2.5-flash",
-                                    contents=prompt_eval,
+                                eval_text = generar_con_fallback(
+                                    client, prompt_eval
                                 )
                                 st.markdown("### 📊 Resultado de la IA:")
-                                st.write(res_eval.text)
+                                st.write(eval_text)
                             except Exception as e:
                                 st.error(
                                     f"🛑 Error evaluando con Gemini: {str(e)}"
